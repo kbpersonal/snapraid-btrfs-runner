@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 import traceback
+import re
 from collections import Counter, defaultdict
 from io import StringIO
 
@@ -25,6 +26,10 @@ def tee_log(infile, out_lines, log_level):
     """
     def tee_thread():
         for line in iter(infile.readline, ""):
+            line = re.sub("\\\\", "", line)
+            # Do not log the progress display
+            if "\r" in line:
+                line = line.split("\r")[-1]
             logging.log(log_level, line.rstrip())
             out_lines.append(line)
         infile.close()
@@ -75,10 +80,7 @@ def snapraid_btrfs_command(command, *, snapraid_args={}, snapraid_btrfs_args={},
     #     snapraid_btrfs_arguments.extend(["--cleanup", config["snapraid-btrfs"]["cleanup-algorithm"]])
     for (k, v) in snapraid_btrfs_args.items():
         snapraid_btrfs_arguments.extend(["--" + k, str(v)])
-    if command == "cleanup":
-        snapraid_arguments = []
-    else:
-        snapraid_arguments = ["--quiet"]
+    snapraid_arguments = []
     for (k, v) in snapraid_args.items():
         snapraid_arguments.extend(["--" + k])
         if v:
@@ -125,6 +127,10 @@ def send_email(success):
         body = "Error during SnapRAID job:\n\n\n"
 
     log = email_log.getvalue()
+    
+    # Remove progress messages
+    log = re.sub("\n[\d :\-,]*\[OUTPUT] \d+%, \d+ MB(?:, \d+ MB\/s, \d+ block\/s, CPU \d+%, [\d:]+ ETA)?", "", log)
+
     maxsize = config['email'].get('maxsize', 500) * 1024
     if maxsize and len(log) > maxsize:
         cut_lines = log.count("\n", maxsize // 2, -maxsize // 2)
