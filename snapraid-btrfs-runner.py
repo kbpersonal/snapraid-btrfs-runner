@@ -33,6 +33,34 @@ def tee_log(infile, out_lines, log_level):
     t.start()
     return t
 
+def snapraid_status_command():
+    """
+    Run snapraid status command
+    Raises subprocess.CalledProcessError if errorlevel != 0
+    """
+    p = subprocess.Popen(
+        [config["snapraid"]["executable"], 'status'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+        # Snapraid always outputs utf-8 on windows. On linux, utf-8
+        # also seems a sensible assumption.
+        encoding="utf-8",
+        errors="replace"
+    )
+    out = []
+    threads = [
+        tee_log(p.stdout, out, logging.OUTPUT),
+        tee_log(p.stderr, [], logging.OUTERR)]
+    for t in threads:
+        t.join()
+    ret = p.wait()
+    # sleep for a while to make pervent output mixup
+    time.sleep(0.3)
+    if ret == 0:
+        return out
+    else:
+        raise subprocess.CalledProcessError(ret, "snapraid status")
 
 def snapraid_btrfs_command(command, *, snapraid_args={}, snapraid_btrfs_args={}, allow_statuscodes=[]):
     """
@@ -336,7 +364,9 @@ def run():
     else:
         logging.info("Running sync...")
         try:
-            snapraid_btrfs_command("sync", snapraid_btrfs_args = snapraid_btrfs_args_extend)
+            snapraid_args_extend = {}
+            snapraid_args_extend["pre-hash"] = ""
+            snapraid_btrfs_command("sync", snapraid_args = snapraid_args_extend, snapraid_btrfs_args = snapraid_btrfs_args_extend)
         except subprocess.CalledProcessError as e:
             logging.error(e)
             finish(False)
@@ -389,6 +419,10 @@ def run():
             finish(False)
         logging.info("*" * 60)
 
+    logging.info("Running status...")
+    snapraid_status_command()
+    logging.info("*" * 60)    
+    
     logging.info("All done")
     finish(True)
 
