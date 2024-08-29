@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 import argparse
 import configparser
@@ -10,7 +11,6 @@ import sys
 import threading
 import time
 import traceback
-import re
 from collections import Counter, defaultdict
 from io import StringIO
 import requests
@@ -30,10 +30,6 @@ def tee_log(infile, out_lines, log_level):
     """
     def tee_thread():
         for line in iter(infile.readline, ""):
-            line = re.sub("\\\\", "", line)
-            # Do not log the progress display
-            if "\r" in line:
-                line = line.split("\r")[-1]
             logging.log(log_level, line.rstrip())
             out_lines.append(line)
         infile.close()
@@ -41,6 +37,7 @@ def tee_log(infile, out_lines, log_level):
     t.daemon = True
     t.start()
     return t
+
 
 # Function to send Discord notification
 def send_discord_notification(success, log):
@@ -68,35 +65,6 @@ def send_discord_notification(success, log):
     except requests.exceptions.RequestException as err:
         logging.error("Something went wrong: %s" % err)
 
-def snapraid_status_command():
-    """
-    Run snapraid status command
-    Raises subprocess.CalledProcessError if errorlevel != 0
-    """
-    p = subprocess.Popen(
-        [config["snapraid"]["executable"], 'status'],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        universal_newlines=True,
-        # Snapraid always outputs utf-8 on windows. On linux, utf-8
-        # also seems a sensible assumption.
-        encoding="utf-8",
-        errors="replace"
-    )
-    out = []
-    threads = [
-        tee_log(p.stdout, out, logging.OUTPUT),
-        tee_log(p.stderr, [], logging.OUTERR)]
-    for t in threads:
-        t.join()
-    ret = p.wait()
-    # sleep for a while to make pervent output mixup
-    time.sleep(0.3)
-    if ret == 0:
-        return out
-    else:
-        raise subprocess.CalledProcessError(ret, "snapraid status")
-
 def snapraid_btrfs_command(command, *, snapraid_args={}, snapraid_btrfs_args={}, allow_statuscodes=[]):
     """
     Run snapraid-btrfs command
@@ -110,11 +78,12 @@ def snapraid_btrfs_command(command, *, snapraid_args={}, snapraid_btrfs_args={},
     #     snapraid_btrfs_arguments.extend(["--cleanup", config["snapraid-btrfs"]["cleanup-algorithm"]])
     for (k, v) in snapraid_btrfs_args.items():
         snapraid_btrfs_arguments.extend(["--" + k, str(v)])
-    snapraid_arguments = []
+    if command == "cleanup":
+        snapraid_arguments = []
+    else:
+        snapraid_arguments = ["--quiet"]
     for (k, v) in snapraid_args.items():
-        snapraid_arguments.extend(["--" + k])
-        if v:
-          snapraid_arguments.extend([str(v)])
+        snapraid_arguments.extend(["--" + k, str(v)])
     p = subprocess.Popen(
         [config["snapraid-btrfs"]["executable"]] + snapraid_btrfs_arguments + [command] + snapraid_arguments,
         stdout=subprocess.PIPE,
@@ -157,10 +126,6 @@ def send_email(success):
         body = "Error during SnapRAID job:\n\n\n"
 
     log = email_log.getvalue()
-    
-    # Remove progress messages
-    log = re.sub("\n[\d :\-,]*\[OUTPUT] \d+%, \d+ MB(?:, \d+ MB\/s, \d+ (?:block|stripe)\/s, CPU \d+%, [\d:]+ ETA)?", "", log)
-
     maxsize = config['email'].get('maxsize', 500) * 1024
     if maxsize and len(log) > maxsize:
         cut_lines = log.count("\n", maxsize // 2, -maxsize // 2)
@@ -172,7 +137,7 @@ def send_email(success):
             log[-maxsize // 2:])
     body += log
 
-    msg = MIMEText("<pre>"+body+"</pre>", "html", "utf-8")
+    msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = config["email"]["subject"] + \
         (" SUCCESS" if success else " ERROR")
     msg["From"] = config["email"]["from"]
@@ -222,7 +187,7 @@ def load_config(args):
 
     parser = configparser.RawConfigParser()
     parser.read(args.conf)
-    sections = ["snapraid-btrfs", "snapper", "snapraid", "logging", "email", "smtp", "scrub"]
+    sections = ["snapraid-btrfs", "snapper", "snapraid", "logging", "email", "smtp", "scrub", "discord"]
     config = dict((x, defaultdict(lambda: "")) for x in sections)
     for section in parser.sections():
         for (k, v) in parser.items(section):
@@ -253,7 +218,7 @@ def load_config(args):
 
     if "discord" in config and config["discord"]["enabled"]:
         discord_webhook_url = config["discord"]["webhook_url"]
-    
+
     # Migration
     if config["scrub"]["percentage"]:
         config["scrub"]["plan"] = config["scrub"]["percentage"]
@@ -415,9 +380,7 @@ def run():
     else:
         logging.info("Running sync...")
         try:
-            snapraid_args_extend = {}
-            snapraid_args_extend["pre-hash"] = ""
-            snapraid_btrfs_command("sync", snapraid_args = snapraid_args_extend, snapraid_btrfs_args = snapraid_btrfs_args_extend)
+            snapraid_btrfs_command("sync", snapraid_btrfs_args = snapraid_btrfs_args_extend)
         except subprocess.CalledProcessError as e:
             logging.error(e)
             finish(False)
@@ -470,11 +433,8 @@ def run():
             finish(False)
         logging.info("*" * 60)
 
-    logging.info("Running status...")
-    snapraid_status_command()
-    logging.info("*" * 60)    
-    
     logging.info("All done")
     finish(True)
 
 main()
+ 
