@@ -40,6 +40,24 @@ def tee_log(infile, out_lines, log_level):
 
 # Function to send Discord notification
 def send_discord_notification(success, log):
+    # Discord embed description limit is 4096 characters
+    max_discord_length = 4096
+
+    # Truncate log if it's too long
+    if len(log) > max_discord_length:
+        # Calculate how many lines were cut
+        truncate_point = max_discord_length // 2
+        cut_lines = log.count("\n", truncate_point, -truncate_point)
+        log = (
+            "NOTE: Log was too big for Discord and was shortened\n\n" +
+            log[:truncate_point] +
+            "\n\n[...]\n\n--- LOG TOO BIG - {} LINES REMOVED ---\n\n[...]\n\n".format(cut_lines) +
+            log[-truncate_point:]
+        )
+        # Ensure we're still under the limit after adding the truncation message
+        if len(log) > max_discord_length:
+            log = log[:max_discord_length - 50] + "\n\n[... TRUNCATED ...]"
+
     payload = {
         "content": "SnapRAID job completed successfully." if success else "Error during SnapRAID job:",
         "embeds": [
