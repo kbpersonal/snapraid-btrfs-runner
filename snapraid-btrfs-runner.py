@@ -45,16 +45,22 @@ def send_discord_notification(success, log):
 
     # Truncate log if it's too long
     if len(log) > max_discord_length:
-        # Calculate how many lines were cut
-        truncate_point = max_discord_length // 2
-        cut_lines = log.count("\n", truncate_point, -truncate_point)
-        log = (
-            "NOTE: Log was too big for Discord and was shortened\n\n" +
-            log[:truncate_point] +
-            "\n\n[...]\n\n--- LOG TOO BIG - {} LINES REMOVED ---\n\n[...]\n\n".format(cut_lines) +
-            log[-truncate_point:]
-        )
-        # Ensure we're still under the limit after adding the truncation message
+        # First pass: drop [OUTPUT] lines (verbose snapraid progress spam) and keep
+        # [INFO], [WARNING], [ERROR], [OUTERR] which contain the important summary info
+        filtered_lines = [l for l in log.splitlines(keepends=True) if "[OUTPUT]" not in l]
+        filtered_log = "".join(filtered_lines)
+        if len(filtered_log) <= max_discord_length:
+            log = "NOTE: Progress output stripped to fit Discord\n\n" + filtered_log
+        else:
+            # Still too long after filtering — fall back to first+last split on filtered content
+            truncate_point = max_discord_length // 2
+            cut_lines = filtered_log.count("\n", truncate_point, -truncate_point)
+            log = (
+                "NOTE: Log was too big for Discord and was shortened\n\n" +
+                filtered_log[:truncate_point] +
+                "\n\n[...]\n\n--- LOG TOO BIG - {} LINES REMOVED ---\n\n[...]\n\n".format(cut_lines) +
+                filtered_log[-truncate_point:]
+            )
         if len(log) > max_discord_length:
             log = log[:max_discord_length - 50] + "\n\n[... TRUNCATED ...]"
 
