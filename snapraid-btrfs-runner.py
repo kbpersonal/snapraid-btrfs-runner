@@ -88,7 +88,7 @@ def send_discord_notification(success, log):
     except requests.exceptions.RequestException as err:
         logging.error("Something went wrong: %s" % err)
 
-def snapraid_btrfs_command(command, *, snapraid_args={}, snapraid_btrfs_args={}, allow_statuscodes=[]):
+def snapraid_btrfs_command(command, *, snapraid_args={}, snapraid_btrfs_args={}, allow_statuscodes=[], extra_snapraid_args=[]):
     """
     Run snapraid-btrfs command
     Raises subprocess.CalledProcessError if errorlevel != 0
@@ -107,6 +107,7 @@ def snapraid_btrfs_command(command, *, snapraid_args={}, snapraid_btrfs_args={},
         snapraid_arguments = ["--quiet"]
     for (k, v) in snapraid_args.items():
         snapraid_arguments.extend(["--" + k, str(v)])
+    snapraid_arguments.extend(extra_snapraid_args)
     p = subprocess.Popen(
         [config["snapraid-btrfs"]["executable"]] + snapraid_btrfs_arguments + [command] + snapraid_arguments,
         stdout=subprocess.PIPE,
@@ -261,6 +262,8 @@ def load_config(args):
     if args.cleanup is not None:
         config["snapraid-btrfs"]["cleanup"] = args.cleanup
 
+    config["snapraid"]["force-empty"] = args.force_empty
+
 
 def setup_logger():
     log_format = logging.Formatter(
@@ -312,6 +315,8 @@ def main():
                         help="Do not scrub (overrides config)")
     parser.add_argument("--ignore-deletethreshold", action='store_true',
                         help="Sync even if configured delete threshold is exceeded (replaces --deletethreshold option)")
+    parser.add_argument("--force-empty", action='store_true',
+                        help="Force sync even if an entire disk appears empty (passes --force-empty to snapraid)")
     parser.add_argument("-d", "--deletethreshold", type=int,
                         default=None, metavar='N',
                         help="Number of deletes to allow (overrides config) (deprecated, use --ignore-deletethreshold)")
@@ -402,8 +407,13 @@ def run():
         logging.info("No changes detected, no sync required")
     else:
         logging.info("Running sync...")
+        sync_snapraid_args = {}
+        sync_extra_args = []
+        if config["snapraid"]["force-empty"]:
+            sync_extra_args = ["--force-empty"]
+            logging.info("Passing --force-empty to snapraid")
         try:
-            snapraid_btrfs_command("sync", snapraid_btrfs_args = snapraid_btrfs_args_extend)
+            snapraid_btrfs_command("sync", snapraid_btrfs_args=snapraid_btrfs_args_extend, snapraid_args=sync_snapraid_args, extra_snapraid_args=sync_extra_args)
         except subprocess.CalledProcessError as e:
             logging.error(e)
             finish(False)
